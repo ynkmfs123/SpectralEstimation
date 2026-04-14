@@ -156,7 +156,7 @@ def main():
     )
 
     seed = 1234
-    n_iter = 2
+    n_iter = 20000
     burn_frac = 0.25
     thin = 2
     signif_level = 0.95
