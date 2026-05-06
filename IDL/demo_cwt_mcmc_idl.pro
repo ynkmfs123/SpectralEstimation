@@ -423,7 +423,7 @@ PRO DEMO_CWT_MCMC_IDL_FINAL, CWT_CT=cwt_ct
                                   CWT_CT=cwt_ct
 END
 
-PRO DEMO_CWT_MCMC_IDL, CWT_CT=cwt_ct
+PRO DEMO_CWT_MCMC, CWT_CT=cwt_ct
   COMPILE_OPT IDL2
 
   DEMO_CWT_MCMC_IDL_FINAL, CWT_CT=cwt_ct
