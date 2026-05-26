@@ -1,0 +1,62 @@
+# A Bayesian CWT+MCMC Method for Oscillation Detection in Non-Stationary Time Series
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19446731.svg)](https://doi.org/10.5281/zenodo.19446731)
+[![Paper](https://img.shields.io/badge/Paper-Accepted-green)](https://ui.adsabs.harvard.edu/...)  <!-- 如果论文已在线，可替换链接 -->
+
+This repository contains the official implementation of the method described in the paper:
+
+> **"A Markov-Chain-Monte-Carlo-based Hybrid Noise Inference for Continuous Wavelet Power Spectra: with Applications to Solar and Stellar Oscillatory Signals"**  
+> Feng, S, Li L, and Yuan, D. (2026). *The Astrophysical Journal Supplement Series* (in press).
+
+## Overview
+
+This code provides a hybrid framework that combines the **Continuous Wavelet Transform (CWT)** with **Bayesian MCMC inference** to detect oscillations in solar and stellar time series under non-stationary red noise and evolving background conditions. It overcomes limitations of traditional AR(1)-based wavelet methods and global Fourier approaches.
+
+Key features:
+- Time-dependent background spectrum estimation (power-law + white noise)
+- Adaptive significance testing without explicit detrending
+- Robust detection for Signal-to-Noise Ratio (S/N) ≳ 2
+- Works on both synthetic and real GOES soft X-ray flare data
+
+
+## Requirements
+
+### Python
+- numpy, scipy, matplotlib
+- PyMC5 (or emcee) for MCMC sampling
+- PyWavelets (for CWT)
+
+### IDL
+- IDL 8.0+ with built-in wavelet and statistics libraries
+
+## Quick Start (Python)
+
+```python
+import numpy as np
+from cwt_mcmc import cwt_mcmc_significance
+
+# Load your time series (e.g., GOES light curve)
+time, flux = load_data()
+
+# Run CWT+MCMC significance test
+significance_map, background_params = cwt_mcmc_significance(
+    flux, dt=2.0,         # time step (seconds)
+    n_mcmc=20000,         # MCMC iterations
+    confidence_level=0.95
+)
+```
+- The output significance map indicates where oscillations are detected
+
+If you use this code in your research, please cite:
+```
+@article{wavelet_mcmc_2026,
+  title={A Markov-Chain-Monte-Carlo-based Hybrid Noise Inference for Continuous Wavelet Power Spectra: with Applications to Solar and Stellar Oscillatory Signals},
+  author={Feng, Song and Li, Lin and Yuan, Ding},
+  journal={ApJS},
+  year={2026},
+  note={accepted, in press}
+}
+```
+### Contact
+
+- Song Feng: feng.song@kust.edu.cn
