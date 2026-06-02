@@ -1,6 +1,3 @@
-;=========================================================
-; 原版正确逻辑 + 仅MCMC提速，不改动任何输出、维度、公式
-;=========================================================
 COMPILE_OPT IDL2
 
 FUNCTION CWT_MCMC_LOG2, x
@@ -148,10 +145,6 @@ FUNCTION CWT_MCMC_LOGPRIOR_DELTA_THETA, theta_mat, t_idx, prop_th, sigmas, mu_an
   RETURN, delta_lp
 END
 
-;============================================================================
-; 原版逻辑 100% 保留 + 向量化 + 预计算 + 无冗余运算
-; 速度提升 2.5~4 倍，结果完全不变
-;============================================================================
 FUNCTION CWT_MCMC_MCMC, y, freqs, n_iter, burn_frac, thin, seed, $
                          mu_anchor, sd_anchor, nu_half_t, $
                          tau_loga, tau_alpha, tau_logc, $
@@ -251,7 +244,6 @@ FUNCTION CWT_MCMC_MCMC, y, freqs, n_iter, burn_frac, thin, seed, $
       keep_count += 1L
     ENDIF
 
-    ; ===================== 原版进度条输出（完全一样） =====================
     IF progress_on THEN BEGIN
       pct = LONG(FLOOR(100D*(it+1L)/DOUBLE(n_iter)))
       IF pct GE next_progress_pct THEN BEGIN
