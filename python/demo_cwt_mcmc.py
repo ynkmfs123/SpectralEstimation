@@ -1,3 +1,4 @@
+
 import os
 import sys
 import numpy as np
@@ -91,14 +92,21 @@ def plot_results(time_axis, signal, has_real_time, periods, power, coi, sig_mask
         vmax=vmax,
         extend="both",
     )
-    ax2.contour(
+    cs = ax2.contour(
         time_axis,
         periods,
         sig_mask.astype(float),
         levels=[0.5],
         colors="k",
-        linewidths=1.3,
+        linewidths=1.6,
+        antialiased=True,
     )
+
+    # smooth contour appearance
+    cs.set_joinstyle("round")
+
+    cs.set_capstyle("round")
+
     ax2.plot(time_axis, coi_period, "k--", lw=1.2)
     ax2.fill_between(
         time_axis,
@@ -135,17 +143,18 @@ def plot_results(time_axis, signal, has_real_time, periods, power, coi, sig_mask
 
 
 def main():
-    data_file = "../synthetic_signal.txt"
+    data_file = "/Users/mymac/Desktop/小波分析/SpectralEstimation-main/synthetic_signal.txt"
     dt = 2.0
 
     signal, time_axis, has_real_time = load_signal_with_time(data_file)
     x_original = normalize_signal(signal)
 
     mother = wavelet.Morlet(6)
-    dj = 1 / 24
+    dj = 1 / 12
     s0 = 2 * dt
     j = -1
 
+    print("[1/3] Computing CWT...", flush=True)
     power, freqs, coi, periods = cwt(
         x=x_original,
         dt=dt,
@@ -156,7 +165,7 @@ def main():
     )
 
     seed = 1234
-    n_iter = 20000
+    n_iter = 2000
     burn_frac = 0.25
     thin = 2
     signif_level = 0.95
@@ -174,6 +183,7 @@ def main():
     prop_sig_logc = 0.05
     prop_sig_logsig = 0.1
 
+    print("[2/3] Running MCMC...", flush=True)
     theta_means, sigmas_mean, bg_spectra = mcmc(
         y=power,
         freqs=freqs,
@@ -191,11 +201,14 @@ def main():
         prop_sig_alpha=prop_sig_alpha,
         prop_sig_logc=prop_sig_logc,
         prop_sig_logsig=prop_sig_logsig,
+        show_progress=True,
+        progress_desc="MCMC",
     )
 
     factor = chi2.ppf(signif_level, 2) / 2
     sig_mask = power > (bg_spectra * factor)
 
+    print("[3/3] Plotting final result...", flush=True)
     plot_results(
         time_axis=time_axis,
         signal=signal,
@@ -209,3 +222,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
