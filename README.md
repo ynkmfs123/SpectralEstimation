@@ -29,22 +29,6 @@ Key features:
 ### IDL
 - IDL 8.0+ with built-in wavelet and statistics libraries
 
-## Quick Start (Python)
-
-```python
-import numpy as np
-from cwt_mcmc import cwt_mcmc_significance
-
-# Load your time series (e.g., GOES light curve)
-time, flux = load_data()
-
-# Run CWT+MCMC significance test
-significance_map, background_params = cwt_mcmc_significance(
-    flux, dt=2.0,         # time step (seconds)
-    n_mcmc=20000,         # MCMC iterations
-    confidence_level=0.95
-)
-```
 - The output significance map indicates where oscillations are detected
 
 If you use this code in your research, please cite:
