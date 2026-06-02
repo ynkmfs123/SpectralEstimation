@@ -219,6 +219,7 @@ PRO DEMO_CWT_MCMC_LOAD_SIGNAL_WITH_TIME, data_file, signal, time_sec, has_real_t
       signal = [value]
       time_sec = [t]
     ENDIF ELSE BEGIN
+
       signal = [signal, value]
       time_sec = [time_sec, t]
     ENDELSE
@@ -378,11 +379,12 @@ PRO DEMO_CWT_MCMC_IDL_FINAL, CWT_CT=cwt_ct
   DEMO_CWT_MCMC_LOAD_SIGNAL_WITH_TIME, data_file, signal, time_sec, has_real_time
   x_original = DEMO_CWT_MCMC_NORMALIZE_SIGNAL(signal)
 
-  dj = 1D / 24D
+  dj = 1D / 12D
   s0 = 2D * dt
   j = -1L
   f0 = 6D
 
+  PRINT, '[1/3] Computing CWT...'
   cwt_res = CWT_MCMC_CWT(x_original, dt, dj, s0, j, F0=f0)
   power = cwt_res.power
   freqs = cwt_res.freqs
@@ -390,9 +392,9 @@ PRO DEMO_CWT_MCMC_IDL_FINAL, CWT_CT=cwt_ct
   periods = cwt_res.periods
 
   seed = 1234L
-  n_iter = 20000L
-  burn_frac = 0.25D
-  thin = 2L
+  n_iter = 2000L
+  burn_frac = 0.2D
+  thin = 4L
   signif_level = 0.95D
 
   mu_anchor = DOUBLE([-8D, -2D, -4D])
@@ -403,21 +405,24 @@ PRO DEMO_CWT_MCMC_IDL_FINAL, CWT_CT=cwt_ct
   tau_alpha = 0.1D
   tau_logc = 0.4D
 
-  prop_sig_loga = 0.05D
-  prop_sig_alpha = 0.02D
-  prop_sig_logc = 0.05D
-  prop_sig_logsig = 0.1D
+  prop_sig_loga = 0.01D
+  prop_sig_alpha = 0.05D
+  prop_sig_logc = 0.1D
+  prop_sig_logsig = 0.200D
 
+  PRINT, '[2/3] Running MCMC...'
   mcmc_res = CWT_MCMC_MCMC(power, freqs, n_iter, burn_frac, thin, seed, $
                            mu_anchor, sd_anchor, nu_half_t, $
                            tau_loga, tau_alpha, tau_logc, $
-                           prop_sig_loga, prop_sig_alpha, prop_sig_logc, prop_sig_logsig)
+                           prop_sig_loga, prop_sig_alpha, prop_sig_logc, prop_sig_logsig, $
+                           /SHOW_PROGRESS, PROGRESS_STEP=5L)
 
   bg_spectra = mcmc_res.bg_spectra
 
   factor = -ALOG(1D - signif_level)
   sig_mask = power GT (bg_spectra * factor)
 
+  PRINT, '[3/3] Plotting final result...'
   DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
                                   periods, power, coi, sig_mask, $
                                   CWT_CT=cwt_ct
