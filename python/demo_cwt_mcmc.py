@@ -1,4 +1,3 @@
-
 import os
 import sys
 import numpy as np
@@ -7,6 +6,7 @@ import matplotlib.ticker as ticker
 import pycwt as wavelet
 from scipy.stats import chi2
 from datetime import datetime
+from matplotlib import colors
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.dates import DateFormatter, MinuteLocator
 
@@ -52,7 +52,7 @@ def pow2_ticks(pmin, pmax):
     return 2 ** np.arange(emin, emax + 1)
 
 
-def plot_results(time_axis, signal, has_real_time, periods, power, coi, sig_mask):
+def plot_results(time_axis, signal, has_real_time, periods, power, coi, bg_spectra, factor):
     fig, axes = plt.subplots(1, 2, figsize=(14, 3.5))
     plt.subplots_adjust(wspace=0.3)
 
@@ -76,36 +76,77 @@ def plot_results(time_axis, signal, has_real_time, periods, power, coi, sig_mask
     ax1.yaxis.offsetText.set_fontsize(10)
 
     ax2 = axes[1]
-    log_power = np.log2(power)
-    vmin, vmax = np.percentile(log_power, [5, 95])
+
+    eps = 1e-300
+    threshold95 = np.maximum(bg_spectra * factor, eps)
+    power_safe = np.maximum(power, eps)
+
+    sig_score = np.log2(power_safe / threshold95)
+
+    valid_vals = sig_score[np.isfinite(sig_score)]
+    vmin, vmax = np.nanpercentile(valid_vals, [2, 98])
+
+    color_center = -1.3
+    vmin = min(vmin, color_center - 1e-6)
+    vmax = max(vmax, color_center + 1e-6)
+
+    plot_score = np.clip(sig_score, vmin, vmax)
+
+    levels = np.linspace(vmin, vmax, 256)
+    norm = colors.TwoSlopeNorm(
+        vmin=vmin,
+        vcenter=color_center,
+        vmax=vmax,
+    )
+
     ticks_2pow = pow2_ticks(periods.min(), periods.max())
     coi_period = np.clip(coi, periods.min(), periods.max())
-    levels = np.linspace(vmin, vmax, 25)
 
-    ax2.contourf(
+    cf = ax2.contourf(
         time_axis,
         periods,
-        log_power,
+        plot_score,
         levels=levels,
         cmap=plt.cm.coolwarm,
-        vmin=vmin,
-        vmax=vmax,
+        norm=norm,
         extend="both",
     )
-    cs = ax2.contour(
-        time_axis,
-        periods,
-        sig_mask.astype(float),
-        levels=[0.5],
-        colors="k",
-        linewidths=1.6,
-        antialiased=True,
-    )
 
-    # smooth contour appearance
-    cs.set_joinstyle("round")
+    cbar = fig.colorbar(cf, ax=ax2, pad=0.02)
+    cbar.set_label(r"$\mathrm{Power}/T_{95}$ (log$_2$ scale)")
 
-    cs.set_capstyle("round")
+    tick_start = int(np.ceil(vmin))
+    tick_end = int(np.floor(vmax))
+    tick_span = tick_end - tick_start
+    tick_step = max(1, int(np.ceil(tick_span / 8)))
+    ticks = list(np.arange(tick_start, tick_end + 1, tick_step))
+
+    if vmin <= 0 <= vmax and 0 not in ticks:
+        ticks.append(0)
+
+    ticks = sorted(ticks)
+
+    ticklabels = []
+    for t in ticks:
+        if t == 0:
+            ticklabels.append(r"1×T$_{95}$")
+        elif t < 0:
+            ticklabels.append(f"1/{int(2 ** abs(t))}")
+        else:
+            ticklabels.append(f"{int(2 ** t)}×")
+
+    cbar.set_ticks(ticks)
+    cbar.set_ticklabels(ticklabels)
+
+    if np.nanmin(sig_score) <= 0 <= np.nanmax(sig_score):
+        ax2.contour(
+            time_axis,
+            periods,
+            sig_score,
+            levels=[0],
+            colors="k",
+            linewidths=1.3,
+        )
 
     ax2.plot(time_axis, coi_period, "k--", lw=1.2)
     ax2.fill_between(
@@ -119,6 +160,7 @@ def plot_results(time_axis, signal, has_real_time, periods, power, coi, sig_mask
         alpha=0.7,
         zorder=3,
     )
+
     ax2.set_yscale("log", base=2)
     ax2.set_ylim(periods.min(), periods.max())
     ax2.set_yticks(ticks_2pow)
@@ -143,7 +185,7 @@ def plot_results(time_axis, signal, has_real_time, periods, power, coi, sig_mask
 
 
 def main():
-    data_file = "/Users/mymac/Desktop/小波分析/SpectralEstimation-main/synthetic_signal.txt"
+    data_file = "synthetic_signal.txt"
     dt = 2.0
 
     signal, time_axis, has_real_time = load_signal_with_time(data_file)
@@ -166,8 +208,8 @@ def main():
 
     seed = 1234
     n_iter = 2000
-    burn_frac = 0.25
-    thin = 2
+    burn_frac = 0.2
+    thin = 4
     signif_level = 0.95
 
     mu_anchor = np.array([-8, -2, -4], dtype=float)
@@ -178,10 +220,10 @@ def main():
     tau_alpha = 0.1
     tau_logc = 0.4
 
-    prop_sig_loga = 0.05
-    prop_sig_alpha = 0.02
-    prop_sig_logc = 0.05
-    prop_sig_logsig = 0.1
+    prop_sig_loga = 0.01
+    prop_sig_alpha = 0.05
+    prop_sig_logc = 0.1
+    prop_sig_logsig = 0.2
 
     print("[2/3] Running MCMC...", flush=True)
     theta_means, sigmas_mean, bg_spectra = mcmc(
@@ -206,7 +248,6 @@ def main():
     )
 
     factor = chi2.ppf(signif_level, 2) / 2
-    sig_mask = power > (bg_spectra * factor)
 
     print("[3/3] Plotting final result...", flush=True)
     plot_results(
@@ -216,10 +257,10 @@ def main():
         periods=periods,
         power=power,
         coi=coi,
-        sig_mask=sig_mask,
+        bg_spectra=bg_spectra,
+        factor=factor,
     )
 
 
 if __name__ == "__main__":
     main()
-
