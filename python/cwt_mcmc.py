@@ -1,118 +1,15 @@
-
 import numpy as np
 import pycwt as wavelet
+from scipy.stats import norm
 from tqdm import tqdm
-from numba import njit
 
 
 def cwt(x, dt, mother, dj, s0, j):
-    wave_out, _, freqs, coi, _, _ = wavelet.cwt(
-        x, dt, dj, s0, j, mother
-    )
-
+    wave_out, _, freqs, coi, _, _ = wavelet.cwt(x, dt, dj, s0, j, mother)
     power = np.abs(wave_out) ** 2
     periods = 1.0 / freqs
-
     return power, freqs, coi, periods
 
-
-# =========================================================
-# NUMBA FUNCTIONS
-# =========================================================
-
-@njit(fastmath=True)
-def loglike_single(loga, alpha, logc, y_col, logf):
-
-    a = np.exp(loga)
-    c = np.exp(logc)
-
-    ll = 0.0
-
-    for k in range(logf.shape[0]):
-
-        model = a * np.exp(alpha * logf[k]) + c
-
-        if model < 1e-300:
-            model = 1e-300
-
-        ll += -np.log(model) - y_col[k] / model
-
-    return ll
-
-
-@njit(fastmath=True)
-def rw2_prior_full(series, sigma):
-
-    n = series.shape[0]
-
-    if n < 3:
-        return 0.0
-
-    s = 0.0
-
-    for i in range(2, n):
-
-        d2 = series[i] - 2.0 * series[i - 1] + series[i - 2]
-        s += (d2 / sigma) ** 2
-
-    return -0.5 * s - (n - 2) * np.log(sigma + 1e-30)
-
-
-@njit(fastmath=True)
-def rw2_delta(series, idx, oldv, newv, sigma):
-
-    n = series.shape[0]
-
-    if n < 3:
-        return 0.0
-
-    old_sum = 0.0
-    new_sum = 0.0
-
-    for i in range(max(2, idx), min(n, idx + 3)):
-
-        d2_old = (
-            series[i]
-            - 2.0 * series[i - 1]
-            + series[i - 2]
-        )
-
-        old_sum += (d2_old / sigma) ** 2
-
-    tmp = series[idx]
-    series[idx] = newv
-
-    for i in range(max(2, idx), min(n, idx + 3)):
-
-        d2_new = (
-            series[i]
-            - 2.0 * series[i - 1]
-            + series[i - 2]
-        )
-
-        new_sum += (d2_new / sigma) ** 2
-
-    series[idx] = tmp
-
-    return -0.5 * (new_sum - old_sum)
-
-
-@njit(fastmath=True)
-def half_t_prior(sigma, nu, tau):
-
-    if sigma <= 0:
-        return -1e300
-
-    return (
-        -0.5 * (nu + 1.0)
-        * np.log(1.0 + (sigma / tau) ** 2 / nu)
-        - np.log(tau)
-    )
-
-
-# =========================================================
-# MAIN MCMC
-# =========================================================
 
 def mcmc(
     y,
@@ -134,227 +31,128 @@ def mcmc(
     show_progress=True,
     progress_desc="MCMC",
 ):
+    def loglike_t(th_t, y_t, logf):
+        if th_t[1] >= 0:
+            return -np.inf
+        m = np.exp(th_t[0]) * np.exp(th_t[1] * logf) + np.exp(th_t[2])
+        m = np.clip(m, 1e-300, np.inf)
+        return np.sum(-np.log(m) - y_t / m)
 
+    def rw2_logprior_full(series, sigma):
+        if series.size < 3:
+            return 0.0
+        d2 = series[2:] - 2 * series[1:-1] + series[:-2]
+        n = d2.size
+        return -0.5 * np.sum((d2 / sigma) ** 2) - n * np.log(sigma + 1e-30)
+
+    def rw2_prior_delta_single_component(old_series, new_val, t_idx, sigma):
+        t_len = old_series.shape[0]
+        if t_len < 3:
+            return 0.0
+
+        def d2(series, i):
+            return series[i] - 2 * series[i - 1] + series[i - 2]
+
+        idxs = [i for i in (t_idx, t_idx + 1, t_idx + 2) if 2 <= i <= t_len - 1]
+        if not idxs:
+            return 0.0
+
+        old_sum = sum((d2(old_series, i) / sigma) ** 2 for i in idxs)
+        new_series = old_series.copy()
+        new_series[t_idx] = new_val
+        new_sum = sum((d2(new_series, i) / sigma) ** 2 for i in idxs)
+        return -0.5 * (new_sum - old_sum)
+
+    def half_t_logprior_sigma(sigma, nu, tau):
+        if sigma <= 0:
+            return -np.inf
+        return -0.5 * (nu + 1.0) * np.log(1.0 + (sigma / tau) ** 2 / nu) - np.log(tau)
+
+    def logprior_delta_theta(theta_mat, t_idx, prop_th, sigmas, mu_anchor, sd_anchor):
+        delta_lp = 0.0
+        if t_idx in (0, 1):
+            old = theta_mat[:, t_idx]
+            delta_lp += (
+                norm.logpdf(prop_th, loc=mu_anchor, scale=sd_anchor).sum()
+                - norm.logpdf(old, loc=mu_anchor, scale=sd_anchor).sum()
+            )
+        delta_lp += rw2_prior_delta_single_component(theta_mat[0, :], prop_th[0], t_idx, sigmas[0])
+        delta_lp += rw2_prior_delta_single_component(theta_mat[1, :], prop_th[1], t_idx, sigmas[1])
+        delta_lp += rw2_prior_delta_single_component(theta_mat[2, :], prop_th[2], t_idx, sigmas[2])
+        return delta_lp
+
+    _, t_len = y.shape
+    logf = np.log(freqs)
     rng = np.random.default_rng(seed)
 
-    n_freq, t_len = y.shape
-
-    logf = np.log(freqs)
-
-    # -----------------------------------------------------
-    # INITIALIZATION
-    # -----------------------------------------------------
-
-    theta = np.tile(mu_anchor[:, None], (1, t_len)).astype(np.float64)
-
-    sigmas = np.array(
-        [tau_loga, tau_alpha, tau_logc],
-        dtype=np.float64
-    )
-
-    cur_ll = np.zeros(t_len)
-
-    for i in range(t_len):
-
-        cur_ll[i] = loglike_single(
-            theta[0, i],
-            theta[1, i],
-            theta[2, i],
-            y[:, i],
-            logf
-        )
-
-    # -----------------------------------------------------
-    # STORAGE
-    # -----------------------------------------------------
+    theta = np.tile(mu_anchor[:, None], (1, t_len)).astype(float)
+    sigmas = np.array([tau_loga, tau_alpha, tau_logc], dtype=float)
+    cur_ll = np.array([loglike_t(theta[:, i], y[:, i], logf) for i in range(t_len)])
 
     burn = int(n_iter * burn_frac)
-
     keep_count = 0
-
     theta_sum = np.zeros_like(theta)
-    sigma_sum = np.zeros_like(sigmas)
+    sigmas_sum = np.zeros_like(sigmas)
 
-    # -----------------------------------------------------
-    # ITERATION
-    # -----------------------------------------------------
-
-    iterator = range(n_iter)
-
+    it_range = range(n_iter)
     if show_progress:
-        iterator = tqdm(iterator, desc=progress_desc, ncols=90)
+        it_range = tqdm(it_range, desc=progress_desc, ncols=90)
 
-    for it in iterator:
-
-        # =================================================
-        # UPDATE THETA
-        # =================================================
-
+    for it in it_range:
         for i in range(t_len):
+            prop = theta[:, i].copy()
+            prop[0] += rng.normal(0, prop_sig_loga)
+            if prop[1] < 0:
+                dll = loglike_t(prop, y[:, i], logf) - cur_ll[i]
+                dlp = logprior_delta_theta(theta, i, prop, sigmas, mu_anchor, sd_anchor)
+                if np.log(rng.random()) < dll + dlp:
+                    theta[:, i] = prop
+                    cur_ll[i] += dll
 
-            old_loga = theta[0, i]
-            old_alpha = theta[1, i]
-            old_logc = theta[2, i]
+            prop = theta[:, i].copy()
+            prop[1] += rng.normal(0, prop_sig_alpha)
+            if prop[1] < 0:
+                dll = loglike_t(prop, y[:, i], logf) - cur_ll[i]
+                dlp = logprior_delta_theta(theta, i, prop, sigmas, mu_anchor, sd_anchor)
+                if np.log(rng.random()) < dll + dlp:
+                    theta[:, i] = prop
+                    cur_ll[i] += dll
 
-            prop_loga = old_loga + rng.normal(0, prop_sig_loga)
-            prop_alpha = old_alpha + rng.normal(0, prop_sig_alpha)
-            prop_logc = old_logc + rng.normal(0, prop_sig_logc)
+            prop = theta[:, i].copy()
+            prop[2] += rng.normal(0, prop_sig_logc)
+            if prop[1] < 0:
+                dll = loglike_t(prop, y[:, i], logf) - cur_ll[i]
+                dlp = logprior_delta_theta(theta, i, prop, sigmas, mu_anchor, sd_anchor)
+                if np.log(rng.random()) < dll + dlp:
+                    theta[:, i] = prop
+                    cur_ll[i] += dll
 
-            # alpha must remain negative
-            if prop_alpha >= 0:
-                continue
-
-            # ---------------------------------------------
-            # LIKELIHOOD
-            # ---------------------------------------------
-
-            prop_ll = loglike_single(
-                prop_loga,
-                prop_alpha,
-                prop_logc,
-                y[:, i],
-                logf
-            )
-
-            dll = prop_ll - cur_ll[i]
-
-            # ---------------------------------------------
-            # PRIOR
-            # ---------------------------------------------
-
-            dlp = 0.0
-
-            if i <= 1:
-
-                old_anchor = (
-                    -0.5 * np.sum(
-                        ((theta[:, i] - mu_anchor) / sd_anchor) ** 2
-                    )
-                )
-
-                new_anchor = (
-                    -0.5 * np.sum(
-                        (
-                            (
-                                np.array([
-                                    prop_loga,
-                                    prop_alpha,
-                                    prop_logc
-                                ]) - mu_anchor
-                            ) / sd_anchor
-                        ) ** 2
-                    )
-                )
-
-                dlp += new_anchor - old_anchor
-
-            dlp += rw2_delta(
-                theta[0, :],
-                i,
-                old_loga,
-                prop_loga,
-                sigmas[0]
-            )
-
-            dlp += rw2_delta(
-                theta[1, :],
-                i,
-                old_alpha,
-                prop_alpha,
-                sigmas[1]
-            )
-
-            dlp += rw2_delta(
-                theta[2, :],
-                i,
-                old_logc,
-                prop_logc,
-                sigmas[2]
-            )
-
-            # ---------------------------------------------
-            # ACCEPT
-            # ---------------------------------------------
-
-            if np.log(rng.random()) < (dll + dlp):
-
-                theta[0, i] = prop_loga
-                theta[1, i] = prop_alpha
-                theta[2, i] = prop_logc
-
-                cur_ll[i] = prop_ll
-
-        # =================================================
-        # UPDATE SIGMAS
-        # =================================================
-
-        taus = np.array(
-            [tau_loga, tau_alpha, tau_logc]
-        )
-
-        for j in range(3):
-
-            old_sigma = sigmas[j]
-
-            prop_logs = (
-                np.log(old_sigma)
-                + rng.normal(0, prop_sig_logsig)
-            )
-
-            prop_sigma = np.exp(prop_logs)
-
-            lp_old = (
-                rw2_prior_full(theta[j, :], old_sigma)
-                + half_t_prior(
-                    old_sigma,
-                    nu_half_t,
-                    taus[j]
-                )
-                + np.log(old_sigma)
-            )
-
-            lp_new = (
-                rw2_prior_full(theta[j, :], prop_sigma)
-                + half_t_prior(
-                    prop_sigma,
-                    nu_half_t,
-                    taus[j]
-                )
-                + np.log(prop_sigma)
-            )
-
-            if np.log(rng.random()) < (lp_new - lp_old):
-
-                sigmas[j] = prop_sigma
-
-        # =================================================
-        # SAVE
-        # =================================================
+        for j, tau in enumerate([tau_loga, tau_alpha, tau_logc]):
+            ls_prop = np.log(sigmas[j]) + rng.normal(0, prop_sig_logsig)
+            sig_prop = np.exp(ls_prop)
+            lp_rw2_prop = rw2_logprior_full(theta[j, :], sig_prop)
+            lp_rw2_curr = rw2_logprior_full(theta[j, :], sigmas[j])
+            lp_sig_prop = half_t_logprior_sigma(sig_prop, nu_half_t, tau)
+            lp_sig_curr = half_t_logprior_sigma(sigmas[j], nu_half_t, tau)
+            lp_prop_total = lp_rw2_prop + lp_sig_prop + ls_prop
+            lp_curr_total = lp_rw2_curr + lp_sig_curr + np.log(sigmas[j])
+            if np.log(rng.random()) < (lp_prop_total - lp_curr_total):
+                sigmas[j] = sig_prop
 
         if it >= burn and ((it - burn) % thin == 0):
-
             theta_sum += theta
-            sigma_sum += sigmas
-
+            sigmas_sum += sigmas
             keep_count += 1
 
-    # =====================================================
-    # POSTERIOR MEAN
-    # =====================================================
-
-    theta_mean = (theta_sum / max(1, keep_count)).T
-
-    sigma_mean = sigma_sum / max(1, keep_count)
+    theta_mean = (theta_sum / max(keep_count, 1)).T
+    sigmas_mean = sigmas_sum / max(keep_count, 1)
 
     loga_mean = theta_mean[:, 0]
     alpha_mean = theta_mean[:, 1]
     logc_mean = theta_mean[:, 2]
-
     bg_spectra = (
-        np.exp(loga_mean)[None, :]
-        * (freqs[:, None] ** alpha_mean[None, :])
+        np.exp(loga_mean)[None, :] * (freqs[:, None] ** alpha_mean[None, :])
         + np.exp(logc_mean)[None, :]
     )
 
-    return theta_mean, sigma_mean, bg_spectra
-
+    return theta_mean, sigmas_mean, bg_spectra
