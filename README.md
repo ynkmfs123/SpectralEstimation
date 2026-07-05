@@ -5,7 +5,7 @@
 This repository contains the official implementation of the method described in the paper:
 
 > **"A Markov-Chain-Monte-Carlo-based Hybrid Noise Inference for Continuous Wavelet Power Spectra: with Applications to Solar and Stellar Oscillatory Signals"**  
-> Feng, S, Li L, and Yuan, D. (2026). *The Astrophysical Journal Supplement Series. 285:17*
+> Feng, S, Li L, and Yuan, D. (2026). *The Astrophysical Journal Supplement Series. 285:17. doi: 10.3847/1538-4365/ae7345*
 
 ## Overview
 
