@@ -33,12 +33,15 @@ Key features:
 
 If you use this code in your research, please cite:
 ```
-@article{wavelet_mcmc_2026,
-  title={A Markov-Chain-Monte-Carlo-based Hybrid Noise Inference for Continuous Wavelet Power Spectra: with Applications to Solar and Stellar Oscillatory Signals},
+@article{feng2026markov,
+  title={A Markov Chain Monte Carlo--based Hybrid Noise Inference for Continuous Wavelet Power Spectra: With Applications to Solar and Stellar Oscillatory Signals},
   author={Feng, Song and Li, Lin and Yuan, Ding},
-  journal={ApJS},
+  journal={The Astrophysical Journal Supplement Series},
+  volume={285},
+  number={1},
+  pages={17},
   year={2026},
-  note={accepted, in press}
+  publisher={The American Astronomical Society}
 }
 ```
 ### Contact
