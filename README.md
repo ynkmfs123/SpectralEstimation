@@ -1,6 +1,5 @@
 # A Bayesian CWT+MCMC Method for Oscillation Detection in Non-Stationary Time Series
 
-[![Paper]( https://doi.org/10.3847/1538-4365/ae7345)]  
 This repository contains the official implementation of the method described in the paper:
 
 > **"A Markov-Chain-Monte-Carlo-based Hybrid Noise Inference for Continuous Wavelet Power Spectra: with Applications to Solar and Stellar Oscillatory Signals"**  
