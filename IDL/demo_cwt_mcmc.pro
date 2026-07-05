@@ -252,7 +252,7 @@ PRO DEMO_CWT_MCMC_DRAW_COI_HATCH, time_x, ylog_coi, ylog_bottom
 END
 
 PRO DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
-                                      periods, power, coi, sig_mask, $
+                                      periods, power, coi, bg_spectra, factor, $
                                       CWT_CT=cwt_ct
   COMPILE_OPT IDL2
 
@@ -265,7 +265,7 @@ PRO DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
   time_x = DOUBLE(time_sec)
   DEMO_CWT_MCMC_BUILD_TIME_TICKS, time_x, has_real_time, xtickv, xtickname, xtitle
 
-  WINDOW, 0, XSIZE=1400, YSIZE=350, TITLE='CWT - MCMC'
+  WINDOW, 0, XSIZE=1700, YSIZE=380, TITLE='CWT - MCMC'
 
   DEMO_CWT_MCMC_LOAD_IDL_CWT_COLORTABLE, CWT_CT=cwt_ct
   ERASE, 255
@@ -274,7 +274,7 @@ PRO DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
   gray = 241
   mpl_blue = 242
 
-  left_pos = [0.065, 0.18, 0.475, 0.88]
+  left_pos = [0.055, 0.18, 0.455, 0.88]
   !P.POSITION = left_pos
 
   signal_absmax = MAX(ABS(DOUBLE(signal)))
@@ -318,14 +318,31 @@ PRO DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
           '(a) Signal', /NORMAL, $
           CHARSIZE=panel_charsize, CHARTHICK=charthick, COLOR=black
 
-  log_power = CWT_MCMC_LOG2(power)
+  eps = 1D-300
+  threshold95 = (DOUBLE(bg_spectra) * DOUBLE(factor)) > eps
+  power_safe = DOUBLE(power) > eps
 
-  vmin = DEMO_CWT_MCMC_PERCENTILE(log_power, 5D)
-  vmax = DEMO_CWT_MCMC_PERCENTILE(log_power, 95D)
-  
-  log_power_plot = (log_power > vmin) < vmax
+  sig_score = CWT_MCMC_LOG2(power_safe / threshold95)
 
-  levels = vmin + (vmax - vmin) * FINDGEN(25) / 24D
+  sig_flat = REFORM(sig_score, N_ELEMENTS(sig_score))
+  finite_idx = WHERE(FINITE(sig_flat), n_finite)
+
+  IF n_finite GT 0L THEN BEGIN
+    valid_vals = sig_flat[finite_idx]
+  ENDIF ELSE BEGIN
+    valid_vals = [0D]
+  ENDELSE
+
+  vmin = DEMO_CWT_MCMC_PERCENTILE(valid_vals, 2D)
+  vmax = DEMO_CWT_MCMC_PERCENTILE(valid_vals, 98D)
+
+  color_center = -1.3D
+  vmin = MIN([vmin, color_center - 1D-6])
+  vmax = MAX([vmax, color_center + 1D-6])
+
+  plot_score = (sig_score > vmin) < vmax
+
+  levels = vmin + (vmax - vmin) * FINDGEN(256) / 255D
 
   ticks_2pow = DEMO_CWT_MCMC_POW2_TICKS(MIN(periods), MAX(periods))
   ylog = CWT_MCMC_LOG2(periods)
@@ -336,13 +353,25 @@ PRO DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
   ylog_coi = CWT_MCMC_LOG2(coi_period)
   ylog_bottom = CWT_MCMC_LOG2(MAX(periods))
 
-  right_pos = [0.575, 0.18, 0.985, 0.88]
+  right_pos = [0.545, 0.18, 0.885, 0.88]
   !P.POSITION = right_pos
 
-  c_colors = FIX(1 + ROUND(FINDGEN(N_ELEMENTS(levels)) * 239D / $
-                           DOUBLE(N_ELEMENTS(levels) - 1L)))
+  level_norm = DBLARR(N_ELEMENTS(levels))
 
-  CONTOUR, TRANSPOSE(log_power_plot), time_x, ylog, /FILL, /CELL_FILL, /NOERASE, LEVELS=levels, $
+  low_idx = WHERE(levels LE color_center, n_low)
+  IF n_low GT 0L THEN BEGIN
+    level_norm[low_idx] = 0.5D * (levels[low_idx] - vmin) / (color_center - vmin)
+  ENDIF
+
+  high_idx = WHERE(levels GT color_center, n_high)
+  IF n_high GT 0L THEN BEGIN
+    level_norm[high_idx] = 0.5D + 0.5D * (levels[high_idx] - color_center) / (vmax - color_center)
+  ENDIF
+
+  level_norm = (level_norm > 0D) < 1D
+  c_colors = FIX(1 + ROUND(level_norm * 239D))
+
+  CONTOUR, TRANSPOSE(plot_score), time_x, ylog, /FILL, /CELL_FILL, /NOERASE, LEVELS=levels, $
          C_COLORS=c_colors, XTITLE=xtitle, YTITLE='Period (s)', $
          XSTYLE=1, YSTYLE=1, $
          XRANGE=[time_x[0], time_x[N_ELEMENTS(time_x)-1L]], $
@@ -355,10 +384,73 @@ PRO DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
 
   DEMO_CWT_MCMC_DRAW_COI_HATCH, time_x, ylog_coi, ylog_bottom
 
-  CONTOUR, TRANSPOSE(DOUBLE(sig_mask)), time_x, ylog, /OVERPLOT, $
-           LEVELS=[0.5D], C_COLORS=[black], THICK=2
+  IF (MIN(valid_vals) LE 0D) AND (MAX(valid_vals) GE 0D) THEN BEGIN
+    CONTOUR, TRANSPOSE(sig_score), time_x, ylog, /OVERPLOT, $
+             LEVELS=[0D], C_COLORS=[black], THICK=2
+  ENDIF
 
   OPLOT, time_x, ylog_coi, LINESTYLE=2, THICK=2, COLOR=black
+
+  cbar_pos = [0.900, 0.18, 0.920, 0.88]
+
+  FOR icb = 0L, N_ELEMENTS(levels) - 2L DO BEGIN
+    y0_cb = cbar_pos[1] + (levels[icb] - vmin) / (vmax - vmin) * (cbar_pos[3] - cbar_pos[1])
+    y1_cb = cbar_pos[1] + (levels[icb + 1L] - vmin) / (vmax - vmin) * (cbar_pos[3] - cbar_pos[1])
+    POLYFILL, [cbar_pos[0], cbar_pos[2], cbar_pos[2], cbar_pos[0]], $
+              [y0_cb, y0_cb, y1_cb, y1_cb], $
+              /NORMAL, COLOR=c_colors[icb]
+  ENDFOR
+
+  PLOTS, [cbar_pos[0], cbar_pos[2], cbar_pos[2], cbar_pos[0], cbar_pos[0]], $
+         [cbar_pos[1], cbar_pos[1], cbar_pos[3], cbar_pos[3], cbar_pos[1]], $
+         /NORMAL, COLOR=black, THICK=1
+
+  tick_start = LONG(CEIL(vmin))
+  tick_end = LONG(FLOOR(vmax))
+  tick_span = tick_end - tick_start
+  tick_step = MAX([1L, LONG(CEIL(DOUBLE(tick_span) / 8D))])
+
+  IF tick_end GE tick_start THEN BEGIN
+    n_cbar_tick = LONG(FLOOR(DOUBLE(tick_end - tick_start) / DOUBLE(tick_step))) + 1L
+    cbar_tickv = DOUBLE(tick_start) + DOUBLE(tick_step) * DINDGEN(n_cbar_tick)
+  ENDIF ELSE BEGIN
+    cbar_tickv = [0D]
+  ENDELSE
+
+  IF (vmin LE 0D) AND (vmax GE 0D) THEN BEGIN
+    zero_idx = WHERE(ABS(cbar_tickv) LT 1D-12, n_zero)
+    IF n_zero EQ 0L THEN cbar_tickv = [cbar_tickv, 0D]
+  ENDIF
+
+  cbar_tickv = cbar_tickv[SORT(cbar_tickv)]
+  cbar_tickname = STRARR(N_ELEMENTS(cbar_tickv))
+
+  FOR itick = 0L, N_ELEMENTS(cbar_tickv) - 1L DO BEGIN
+    t = LONG(ROUND(cbar_tickv[itick]))
+
+    IF t EQ 0L THEN BEGIN
+      cbar_tickname[itick] = '1xT95'
+    ENDIF ELSE IF t LT 0L THEN BEGIN
+      cbar_tickname[itick] = '1/' + STRTRIM(STRING(LONG(ROUND(2D ^ ABS(t)))), 2)
+    ENDIF ELSE BEGIN
+      cbar_tickname[itick] = STRTRIM(STRING(LONG(ROUND(2D ^ t))), 2) + 'x'
+    ENDELSE
+  ENDFOR
+
+
+  FOR itick = 0L, N_ELEMENTS(cbar_tickv) - 1L DO BEGIN
+    y_cb = cbar_pos[1] + (cbar_tickv[itick] - vmin) / (vmax - vmin) * (cbar_pos[3] - cbar_pos[1])
+    IF (y_cb GE cbar_pos[1]) AND (y_cb LE cbar_pos[3]) THEN BEGIN
+      PLOTS, [cbar_pos[2], cbar_pos[2] + 0.006D], [y_cb, y_cb], /NORMAL, $
+             COLOR=black, THICK=1
+      XYOUTS, cbar_pos[2] + 0.010D, y_cb - 0.008D, cbar_tickname[itick], /NORMAL, $
+              CHARSIZE=1.15, CHARTHICK=charthick, COLOR=black
+    ENDIF
+  ENDFOR
+
+  XYOUTS, cbar_pos[2] + 0.045D, 0.37D * (cbar_pos[1] + cbar_pos[3]), $
+          'Power/T95 (log2 scale)', /NORMAL, ORIENTATION=90D, $
+          CHARSIZE=1.15, CHARTHICK=charthick, COLOR=black
 
   XYOUTS, right_pos[0] + 0.02 * (right_pos[2] - right_pos[0]), $
           right_pos[1] + 0.02 * (right_pos[3] - right_pos[1]), $
@@ -420,11 +512,10 @@ PRO DEMO_CWT_MCMC_IDL_FINAL, CWT_CT=cwt_ct
   bg_spectra = mcmc_res.bg_spectra
 
   factor = -ALOG(1D - signif_level)
-  sig_mask = power GT (bg_spectra * factor)
 
   PRINT, '[3/3] Plotting final result...'
   DEMO_CWT_MCMC_PLOT_RESULTS_FINAL, time_sec, signal, has_real_time, $
-                                  periods, power, coi, sig_mask, $
+                                  periods, power, coi, bg_spectra, factor, $
                                   CWT_CT=cwt_ct
 END
 
